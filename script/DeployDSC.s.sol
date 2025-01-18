@@ -11,7 +11,10 @@ contract DeployDSC is Script {
     address[] public tokenAddresses;
     address[] public priceFeedAddresses;
 
-    function run() external returns (DecentralizeStableCoin, DSCEngine) {
+    function run()
+        external
+        returns (DecentralizeStableCoin, DSCEngine, HelperConfig)
+    {
         HelperConfig config = new HelperConfig();
         (
             address wEthUsdPriceFeed,
@@ -33,6 +36,6 @@ contract DeployDSC is Script {
         dsc.transferOwnership(address(engine)); //from the ownerable inheritance, now only the engine can do anything with it
         vm.stopBroadcast();
 
-        return (dsc, engine);
+        return (dsc, engine, config);
     }
 }

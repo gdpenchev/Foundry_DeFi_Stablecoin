@@ -29,6 +29,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/Ag
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {DecentralizeStableCoin} from "./DecentralizeStableCoin.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 /*
  * @title DSCEngine
@@ -93,7 +94,14 @@ contract DSCEngine is ReentrancyGuard {
         address indexed token,
         uint256 amount
     );
+
+    /////////////////////
+    // Types //
+    /////////////////////
     /////////////
+
+    using OracleLib for AggregatorV3Interface;
+
     // Modifiers //
     /////////////
 
@@ -275,6 +283,16 @@ contract DSCEngine is ReentrancyGuard {
     // Private & Internal Functions //
     /////////////////////////////////
 
+    function _calculateHealthFactor(
+        uint256 totalDscMinted,
+        uint256 collateralValueInUsd
+    ) internal pure returns (uint256) {
+        if (totalDscMinted == 0) return type(uint256).max;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
+            LIQUIDATION_THRESHHOLD) / LIQUIDATION_PRECISION;
+        return (collateralAdjustedForThreshold * 1e18) / totalDscMinted;
+    }
+
     function _burnDsc(
         uint256 amountDscToBunr,
         address onBehalfOf,
@@ -338,10 +356,7 @@ contract DSCEngine is ReentrancyGuard {
             uint256 collateralValueInUsd
         ) = _getAccountInformation(user);
 
-        uint256 collaterAdjustedThreshold = (collateralValueInUsd *
-            LIQUIDATION_THRESHHOLD) / LIQUIDATION_PRECISION;
-
-        return (collaterAdjustedThreshold * PRECISION) / totalDSCMinted;
+        return _calculateHealthFactor(totalDSCMinted, collateralValueInUsd);
 
         ///if we have 1000 ETH * 50 = 50 000 / 100 = 500
         //100 ETH and 100 DSC minted
@@ -368,7 +383,7 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeeds[token]
         );
-        (, int256 price, , , ) = priceFeed.latestRoundData();
+        (, int256 price, , , ) = priceFeed.staleCheckLatestRoundData();
         return
             (usdAmountInWei * PRECISION) /
             (uint256(price) * ADDITIONAL_FEED_RATIO);
@@ -393,8 +408,46 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeeds[token]
         );
-        (, int price, , , ) = priceFeed.latestRoundData();
+        (, int price, , , ) = priceFeed.staleCheckLatestRoundData();
 
         return ((uint256(price) * ADDITIONAL_FEED_RATIO) * amount) / PRECISION;
+    }
+
+    function getCollateralBalanceOfUser(
+        address user,
+        address token
+    ) external view returns (uint256) {
+        return s_collaterDeposited[user][token];
+    }
+
+    function getAccountInformation(
+        address user
+    )
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
+    {
+        (totalDscMinted, collateralValueInUsd) = _getAccountInformation(user);
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return s_collateralTokens;
+    }
+
+    function getCollateralTokenPriceFeed(
+        address token
+    ) external view returns (address) {
+        return s_priceFeeds[token];
+    }
+
+    // function getAdditionalFeedPrecision() external pure returns (uint256) {
+    //     return ADDITIONAL_FEED_PRECISION;
+    // }
+
+    function calculateHealthFactor(
+        uint256 totalDscMinted,
+        uint256 collateralValueInUsd
+    ) external pure returns (uint256) {
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
     }
 }

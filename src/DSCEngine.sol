@@ -440,9 +440,13 @@ contract DSCEngine is ReentrancyGuard {
         return s_priceFeeds[token];
     }
 
-    // function getAdditionalFeedPrecision() external pure returns (uint256) {
-    //     return ADDITIONAL_FEED_PRECISION;
-    // }
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_RATIO;
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
+    }
 
     function calculateHealthFactor(
         uint256 totalDscMinted,

@@ -2,12 +2,13 @@
 
 pragma solidity ^0.8.19;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {DeployDSC} from "../../script/DeployDSC.s.sol";
 import {DecentralizeStableCoin} from "../../src/DecentralizeStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/ERC20Mock.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract DSCEngineTest is Test {
     DeployDSC deployer;
@@ -18,11 +19,12 @@ contract DSCEngineTest is Test {
     address btcUsdPriceFeed;
     address weth;
 
+    uint256 amountCollateral = 10 ether;
+    uint256 amountToMint = 100 ether;
+
     address public USER = makeAddr("user");
     uint256 public constant AMOUNT_COLLATERAL = 10 ether;
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
-    uint256 amountToMint = 100 ether;
-    uint256 amountCollateral = 10 ether;
 
     function setUp() public {
         deployer = new DeployDSC();
@@ -104,6 +106,18 @@ contract DSCEngineTest is Test {
         _;
     }
 
+    modifier depositCollaterAndMintDsc() {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(engine), AMOUNT_COLLATERAL);
+        engine.depositCollateralAndMintDSC(
+            weth,
+            AMOUNT_COLLATERAL,
+            amountToMint
+        );
+        vm.stopPrank();
+        _;
+    }
+
     function testCanDepositCollateralAndGetAccountInfo()
         public
         depositedCollateral
@@ -118,6 +132,89 @@ contract DSCEngineTest is Test {
         );
         assertEq(totalDscMinted, expectedTotalDscMinted);
         assertEq(AMOUNT_COLLATERAL, expectedDepositAmount);
+    }
+
+    ///////////////////////////////////////
+    // Mint Tests //
+    ///////////////////////////////////////
+
+    function testMintDscRevertsIfZero() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(engine), amountCollateral);
+        engine.depositCollateralAndMintDSC(
+            weth,
+            amountCollateral,
+            amountToMint
+        );
+        vm.expectRevert(DSCEngine.DSCEngine__NeedsMoreThanZero.selector);
+        engine.mindDsc(0);
+        vm.stopPrank();
+    }
+
+    function testMintRevertsIfHealthIsBroken() public depositedCollateral {
+        (, int256 price, , , ) = MockV3Aggregator(ethUsdPriceFeed)
+            .latestRoundData();
+
+        console.log(price);
+
+        amountToMint =
+            (amountCollateral *
+                (uint256(price) * engine.getAdditionalFeedPrecision())) /
+            engine.getPrecision();
+
+        console.log(amountToMint);
+
+        vm.startPrank(USER);
+
+        uint256 expectedHealthFactor = engine.calculateHealthFactor(
+            amountToMint,
+            engine.getUsdValue(weth, amountCollateral)
+        );
+
+        console.log("expected", expectedHealthFactor);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DSCEngine.DSCEngine__HealthFactorBroken.selector,
+                expectedHealthFactor
+            )
+        );
+        engine.mindDsc(amountToMint);
+        vm.stopPrank();
+    }
+
+    function testCanMintDsc() public depositedCollateral {
+        vm.startPrank(USER);
+
+        engine.mindDsc(amountToMint);
+
+        uint256 userBalance = dsc.balanceOf(USER);
+        assertEq(userBalance, amountToMint);
+    }
+
+    ///////////////////////////////////
+    // burnDsc Tests //
+    ///////////////////////////////////
+    function testBurnDscReversIfAmountIsZero() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(engine), amountCollateral);
+        engine.depositCollateralAndMintDSC(
+            weth,
+            amountCollateral,
+            amountToMint
+        );
+        vm.expectRevert(DSCEngine.DSCEngine__NeedsMoreThanZero.selector);
+        engine.burnDSC(0);
+        vm.stopPrank();
+    }
+
+    function testBurnDscBurnSuccessful() public depositCollaterAndMintDsc {
+        vm.startPrank(USER);
+        dsc.approve(address(engine), amountToMint);
+        engine.burnDSC(amountToMint);
+        uint256 userBalance = dsc.balanceOf(USER);
+        assertEq(userBalance, 0);
+        vm.stopPrank();
     }
 
     ///////////////////////////////////////
